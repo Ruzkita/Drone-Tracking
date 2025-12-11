@@ -1,0 +1,18 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/lacea/ros2_ws/build/ros2_gazeboworld",
+        "/home/lacea/ros2_ws/install/ros2_gazeboworld/lib/python3.10/site-packages",
+        "/home/lacea/ros2_ws/build/drone_tracking_py",
+        "/home/lacea/ros2_ws/install/drone_tracking_py/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/lacea/ros2_ws/build/ros2_gazeboworld",
+        "/home/lacea/ros2_ws/install/ros2_gazeboworld/lib/python3.10/site-packages",
+        "/home/lacea/ros2_ws/build/drone_tracking_py",
+        "/home/lacea/ros2_ws/install/drone_tracking_py/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
+}

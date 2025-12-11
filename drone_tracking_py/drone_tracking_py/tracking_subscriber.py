@@ -78,13 +78,32 @@ class KalmanFilter:
 
 class TrackerNode(Node):
     def __init__(self):
-        pass
+        super().__init__('tracker_node')
+        self.yolo_detection = YoloDetection()
+        self.kalman = KalmanFilter()
+
+        #CONFIGURAÇÃO DA CÂMERA
+        self.SHOW_WINDOW = False
+        self.FPS = 30
+        self.FRAME_SIZE = (640, 640)
+
+        #QOS
+        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1)
+
+        #SUBSCRIBERS
+        self.camera_subscription = self.create_subscription(CompressedImage, '/camera/compressed', self.image_callback, qos)
+    
+    
+    def image_callback(self, msg):
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        frame = cv.imdecode(np_arr, cv.IMREAD_COLOR)
+
+        centers, annoted_frame = self.yolo_detection.bb_centers(frame)
 
     ########################    ESTOU REMODELANDO TD, ESTAMOS EM OBRAS      #################################
         
 
-class CameraShow(Node):
-    
+class CameraShow(Node):    
     def __init__(self):
         super().__init__('camera_show')
         cv.namedWindow("Detecção YOLO", cv.WINDOW_NORMAL)
