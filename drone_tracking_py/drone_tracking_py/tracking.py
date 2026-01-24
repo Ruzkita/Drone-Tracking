@@ -37,13 +37,6 @@ class Detection(Node):
         self.frame_c = 0
         self.annoted_frame = None
 
-        #Import da rede neural
-        package_dir = get_package_share_directory('drone_tracking')
-       # model_path = os.path.join(package_dir, 'net_train', 'weights', 'best.pt')
-       # self.model = YOLO(model_path)
-       # self.model.export(format="ncnn")
-        #self.model = NCNNRunner(os.path.join(package_dir, 'net_train', 'weights'))
-
         #Timer para 30 FPS
         timer_period = 1.0 / 30.0
         self.timer = self.create_timer(timer_period, self.capture_callback)
@@ -53,18 +46,6 @@ class Detection(Node):
         if not ret:
             self.get_logger().error("Erro ao capturar frame da câmera")
             return
-
-
-        #Detecção com YOLO
-        #self.frame_c += 1
-        #if self.frame_c % 10 == 0:
-            #boxes, scores, classes = self.model.run(frame)
-            #self.annoted_frame = np.array(results[0])
-        #else:
-            #self.annoted_frame = None
-
-        #Frame para exibição
-        #frame_show = self.annoted_frame if self.annoted_frame is not None else frame
 
         #Converte para imagem comprimida (JPEG)
         ros_compressed_image = self.bridge.cv2_to_compressed_imgmsg(frame, dst_format='jpeg')
