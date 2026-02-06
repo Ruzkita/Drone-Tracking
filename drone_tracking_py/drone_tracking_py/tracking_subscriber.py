@@ -114,9 +114,50 @@ class LukasKanade():
         return vx, vy, True
 
 
+class FrameTransform():
+    def __init__(self):
+        self.fx, self.fy = 0, 0       #a definir
+        self.cx, self.cy = 0, 0       #a definir
+        
+        theta = np.deg2rad(45)
+        self.R = np.array([
+            [np.cos(theta), 0, np.sin(theta)],
+            [0, 1, 0],
+            [-np.sin(theta), 0, np.cos(theta)]
+        ])
+        self.t = [0, 0, 0]  #a definir
+    
+    def pixel_to_body_position(self, px, py, depth):
+        if depth <= 0:
+            return None
+
+        Xc = (px - self.cx) * depth / self.fx
+        Yc = (py - self.cx) * depth / self.fy
+        Zc = depth
+
+        p_c = np.array([Xc, Yc, Zc])
+        p_b = self.R @ p_c + self.t
+
+        return p_b
+    
+    def pixel_to_body_velocity(self, vpx, vpy, depth):
+        if depth <= 0:
+            return None
+        
+        Vxc = depth * vpx / self.fx
+        Vyc = depth * vpy / self.fy
+        Vzc = 0.0
+
+        v_c = np.array([Vxc, Vyc, Vzc])
+        v_b = self.R @ v_c
+
+        return v_b
+
+
+
 class KalmanFilter:
     def __init__(self, dt):
-        self.x = np.zeros((6, 1))                                   #px, py, h, vx, vy, vh, ax, ay -> variaveis 
+        self.x = np.zeros((6, 1))                                   #px, py, z, vx, vy, vz -> variaveis 
         self.P = np.eye(6) * 1000                                   #matriz diagonal com valor 1000 -> incerteza
         self.dt = dt                                                #intervalo de tempo
         self.Q = np.eye(6) * 0.1                                    #matriz de covariancia do modelo -> representa a covariancia dos ruidos e perturbações do processo (modelo)
@@ -138,7 +179,7 @@ class KalmanFilter:
 
         K = P_next @ H.T @ np.linalg.inv(H @ P_next @ H.T + self.R)
         self.x = x_next + K @ (z - H @ x_next)   
-        self.P = (np.eye(8) - K @ H) @ P_next
+        self.P = (np.eye(6) - K @ H) @ P_next
 
         return self.x
 
@@ -149,6 +190,7 @@ class TrackerNode(Node):
         self.yolo_detection = YoloDetection()
         self.kalman = KalmanFilter()
         self.lk = LukasKanade()
+        self.frame_transform = FrameTransform()
 
         #CONFIGURAÇÃO DA CÂMERA
         self.SHOW_WINDOW = False
@@ -184,8 +226,8 @@ class TrackerNode(Node):
                 ])
 
                 x, y = centers[0]
-                z = [x, y, d]
                 
+                z = self.frame_transform.pixel_to_body_position(x, y, d)
                 state = self.kalman.algorithm(H, z)
 
         else:
@@ -196,8 +238,8 @@ class TrackerNode(Node):
         if vx is not None and vy is not None:
             H = np.array([
                 [0, 0, 0, 1, 0, 0],
-                [0, 0, 0, 0, 1, 0],
-                [0, 0, 0, 0, 0, 1]
+                [0, 0, 0, 0, 1, 0]
             ])
 
+            z = self.frame_transform.pixel_to_body_velocity(vx, vy, d)
             state = self.kalman.algorithm(H, z)
