@@ -4,11 +4,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import cv2 as cv
 from sensor_msgs.msg import CompressedImage
 from cv_bridge import CvBridge
-import os
-from ultralytics import YOLO
-from ament_index_python import get_package_share_directory
 import numpy as np
-#from drone_tracking.run_ncnn import NCNNRunner
 
 
 class Detection(Node):
