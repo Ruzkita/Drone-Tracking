@@ -19,7 +19,7 @@ class CameraNode(Node):
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
-            depth=50  # aumenta a fila para não descartar frames
+            depth=1  # aumenta a fila para não descartar frames
         )
 
         # --- RealSense pipeline ---
