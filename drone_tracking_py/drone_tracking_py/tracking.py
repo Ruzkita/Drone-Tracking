@@ -6,7 +6,7 @@ import cv2 as cv
 import pyrealsense2 as rs
 import numpy as np
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage
 from cv_bridge import CvBridge
 
 
@@ -26,7 +26,7 @@ class CameraNode(Node):
         self.pipeline = rs.pipeline()
         config = rs.config()
 
-        # Reduzido para 640x360 e 15 FPS, mais confiável no Raspberry Pi
+        # Resolução menor e FPS baixo para Raspberry Pi
         config.enable_stream(rs.stream.color, 640, 360, rs.format.bgr8, 15)
         config.enable_stream(rs.stream.depth, 640, 360, rs.format.z16, 15)
 
@@ -35,19 +35,18 @@ class CameraNode(Node):
         # Bridge ROS <-> OpenCV
         self.bridge = CvBridge()
 
-        # Publishers
-        self.color_pub = self.create_publisher(Image, '/camera/color/image_raw', qos)
-        self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', qos)
+        # Publishers usando CompressedImage
+        self.color_pub = self.create_publisher(CompressedImage, '/camera/color/compressed', qos)
+        self.depth_pub = self.create_publisher(CompressedImage, '/camera/depth/compressed', qos)
 
-        # Timer 30 FPS (o callback já trata a RealSense mais lenta)
+        # Timer ~30Hz
         timer_period = 1.0 / 30.0
         self.timer = self.create_timer(timer_period, self.capture_callback)
 
-        self.get_logger().info("RealSense node iniciado")
+        self.get_logger().info("RealSense node iniciado (CompressedImage)")
 
     def capture_callback(self):
         try:
-            # Timeout maior para Pi (500ms)
             frames = self.pipeline.wait_for_frames(timeout_ms=500)
         except RuntimeError:
             self.get_logger().warn("Nenhum frame recebido no tempo limite")
@@ -69,9 +68,9 @@ class CameraNode(Node):
             cv.COLORMAP_JET
         )
 
-        # Converte para ROS Image
-        color_msg = self.bridge.cv2_to_imgmsg(color_image, encoding='bgr8')
-        depth_msg = self.bridge.cv2_to_imgmsg(depth_colormap, encoding='bgr8')
+        # Converte para ROS CompressedImage
+        color_msg = self.bridge.cv2_to_compressed_imgmsg(color_image, dst_format='jpeg')
+        depth_msg = self.bridge.cv2_to_compressed_imgmsg(depth_colormap, dst_format='jpeg')
 
         # Publica
         self.color_pub.publish(color_msg)
