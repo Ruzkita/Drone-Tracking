@@ -6,7 +6,7 @@ import cv2 as cv
 import pyrealsense2 as rs
 import numpy as np
 
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
 from cv_bridge import CvBridge
 
 
@@ -17,9 +17,9 @@ class CameraNode(Node):
 
         # QoS confiável para imagens com depth maior
         qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
-            depth=5  # aumenta a fila para não descartar frames
+            depth=50  # aumenta a fila para não descartar frames
         )
 
         # --- RealSense pipeline ---
@@ -27,8 +27,8 @@ class CameraNode(Node):
         config = rs.config()
 
         # Resolução menor e FPS baixo para Raspberry Pi
-        config.enable_stream(rs.stream.color, 640, 360, rs.format.bgr8, 15)
-        config.enable_stream(rs.stream.depth, 640, 360, rs.format.z16, 15)
+        config.enable_stream(rs.stream.color, 424, 240, rs.format.bgr8, 15)
+        config.enable_stream(rs.stream.depth, 424, 240, rs.format.z16, 15)
 
         self.pipeline.start(config)
 
@@ -36,8 +36,8 @@ class CameraNode(Node):
         self.bridge = CvBridge()
 
         # Publishers usando CompressedImage
-        self.color_pub = self.create_publisher(CompressedImage, '/camera/color/compressed', qos)
-        self.depth_pub = self.create_publisher(CompressedImage, '/camera/depth/compressed', qos)
+        self.color_pub = self.create_publisher(Image, '/camera/color/image_raw', qos)
+        self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', qos)
 
         # Timer ~30Hz
         timer_period = 1.0 / 30.0
@@ -47,7 +47,7 @@ class CameraNode(Node):
 
     def capture_callback(self):
         try:
-            frames = self.pipeline.wait_for_frames(timeout_ms=500)
+            frames = self.pipeline.wait_for_frames(timeout_ms=1000)
         except RuntimeError:
             self.get_logger().warn("Nenhum frame recebido no tempo limite")
             return
@@ -69,11 +69,11 @@ class CameraNode(Node):
         )
 
         # Converte para ROS CompressedImage
-        color_msg = self.bridge.cv2_to_compressed_imgmsg(color_image, dst_format='jpeg')
+        color_msg = self.bridge.cv2_to_imgmsg(color_image, encoding='bgr8')
         color_msg.header.frame_id = "camera_color"
         color_msg.header.stamp = self.get_clock().now().to_msg()  # timestamp real
 
-        depth_msg = self.bridge.cv2_to_compressed_imgmsg(depth_colormap, dst_format='jpeg')
+        depth_msg = self.bridge.cv2_to_imgmsg(depth_colormap, encoding='bgr8')
         depth_msg.header.frame_id = "camera_depth"
         depth_msg.header.stamp = self.get_clock().now().to_msg()  # timestamp real
 
