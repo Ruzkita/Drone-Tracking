@@ -70,7 +70,10 @@ class CameraNode(Node):
 
         # Converte para ROS CompressedImage
         color_msg = self.bridge.cv2_to_compressed_imgmsg(color_image, dst_format='jpeg')
+        color_msg.header.frame_id = "camera_color"
+
         depth_msg = self.bridge.cv2_to_compressed_imgmsg(depth_colormap, dst_format='jpeg')
+        depth_msg.header.frame_id = "camera_depth"
 
         # Publica
         self.color_pub.publish(color_msg)
