@@ -1,66 +1,110 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 import cv2 as cv
-from sensor_msgs.msg import CompressedImage
-from cv_bridge import CvBridge
+import pyrealsense2 as rs
 import numpy as np
 
+from sensor_msgs.msg import CompressedImage, Image
+from cv_bridge import CvBridge
 
-class Detection(Node):
+
+class CameraNode(Node):
+
     def __init__(self):
-        super().__init__('detection')
+        super().__init__('realsense_camera')
 
-        #Definição de QoS pra reduzir delay na transmissão da câmera
-        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1)
+        qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
 
-        # Inicializa câmera
-        self.cap = cv.VideoCapture(0, cv.CAP_V4L2)
-        self.cap.set(cv.CAP_PROP_FPS, 30)
-        self.cap.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
+        # --- RealSense pipeline ---
+        self.pipeline = rs.pipeline()
+        config = rs.config()
 
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 
-        fps = self.cap.get(cv.CAP_PROP_FPS)
-        self.get_logger().info(f"FPS configurado na câmera: {fps}")
+        self.pipeline.start(config)
 
-        #Publisher de imagem
-        self.camera_publishing = self.create_publisher(CompressedImage, '/camera/compressed', qos)
+        # Bridge
         self.bridge = CvBridge()
 
-        #Variáveis de controle
-        self.frame_c = 0
-        self.annoted_frame = None
+        # Publishers
+        self.color_pub = self.create_publisher(
+            Image,
+            '/camera/color',
+            qos
+        )
 
-        #Timer para 30 FPS
+        self.depth_pub = self.create_publisher(
+            Image,
+            '/camera/depth',
+            qos
+        )
+
+        # Timer 30 FPS
         timer_period = 1.0 / 30.0
         self.timer = self.create_timer(timer_period, self.capture_callback)
 
+        self.get_logger().info("RealSense node iniciado")
+
     def capture_callback(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            self.get_logger().error("Erro ao capturar frame da câmera")
+
+        frames = self.pipeline.wait_for_frames()
+
+        color_frame = frames.get_color_frame()
+        depth_frame = frames.get_depth_frame()
+
+        if not color_frame or not depth_frame:
             return
 
-        #Converte para imagem comprimida (JPEG)
-        ros_compressed_image = self.bridge.cv2_to_compressed_imgmsg(frame, dst_format='jpeg')
-        self.camera_publishing.publish(ros_compressed_image)
+        # Convertendo para numpy
+        color_image = np.asanyarray(color_frame.get_data())
+        depth_image = np.asanyarray(depth_frame.get_data())
+
+        # Normaliza depth para visualização
+        depth_colormap = cv.applyColorMap(
+            cv.convertScaleAbs(depth_image, alpha=0.03),
+            cv.COLORMAP_JET
+        )
+
+        # Converte para ROS compressed
+        color_msg = self.bridge.cv2_to_imgmsg(
+            color_image,
+            encoding='bgr8'
+        )
+
+        depth_msg = self.bridge.cv2_to_imgmsg(
+            depth_colormap,
+            encoding='bgr8'
+        )
+
+        # Publica
+        self.color_pub.publish(color_msg)
+        self.depth_pub.publish(depth_msg)
 
     def destroy_node(self):
-        # Libera recursos ao encerrar
-        self.cap.release()
-        #cv.destroyAllWindows()
+
+        self.pipeline.stop()
         super().destroy_node()
 
 
 def main(args=None):
+
     rclpy.init(args=args)
-    node = Detection()
+
+    node = CameraNode()
+
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     node.destroy_node()
     rclpy.shutdown()
 
