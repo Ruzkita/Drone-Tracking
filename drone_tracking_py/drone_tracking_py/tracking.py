@@ -15,11 +15,11 @@ class CameraNode(Node):
     def __init__(self):
         super().__init__('realsense_camera')
 
-        # QoS confiável para imagens
+        # QoS confiável para imagens com depth maior
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1
+            depth=5  # aumenta a fila para não descartar frames
         )
 
         # --- RealSense pipeline ---
@@ -71,9 +71,11 @@ class CameraNode(Node):
         # Converte para ROS CompressedImage
         color_msg = self.bridge.cv2_to_compressed_imgmsg(color_image, dst_format='jpeg')
         color_msg.header.frame_id = "camera_color"
+        color_msg.header.stamp = self.get_clock().now().to_msg()  # timestamp real
 
         depth_msg = self.bridge.cv2_to_compressed_imgmsg(depth_colormap, dst_format='jpeg')
         depth_msg.header.frame_id = "camera_depth"
+        depth_msg.header.stamp = self.get_clock().now().to_msg()  # timestamp real
 
         # Publica
         self.color_pub.publish(color_msg)
