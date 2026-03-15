@@ -36,13 +36,13 @@ class CameraNode(Node):
         # Publishers
         self.color_pub = self.create_publisher(
             Image,
-            '/camera/color',
+            '/camera/color/image_raw',
             qos
         )
 
         self.depth_pub = self.create_publisher(
             Image,
-            '/camera/depth',
+            '/camera/depth/image_raw',
             qos
         )
 
@@ -54,7 +54,7 @@ class CameraNode(Node):
 
     def capture_callback(self):
 
-        frames = self.pipeline.wait_for_frames()
+        frames = self.pipeline.wait_for_frames(timeout_ms=100)
 
         color_frame = frames.get_color_frame()
         depth_frame = frames.get_depth_frame()
