@@ -6,7 +6,7 @@ import cv2 as cv
 import pyrealsense2 as rs
 import numpy as np
 
-from sensor_msgs.msg import CompressedImage, Image
+from sensor_msgs.msg import CompressedImage, Image, CameraInfo
 from cv_bridge import CvBridge
 
 
@@ -15,41 +15,100 @@ class CameraNode(Node):
     def __init__(self):
         super().__init__('realsense_camera')
 
-        # QoS confiável para imagens com depth maior
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1  # aumenta a fila para não descartar frames
+            depth=1
         )
 
-        # --- RealSense pipeline ---
+        # --- RealSense ---
         self.pipeline = rs.pipeline()
         config = rs.config()
 
-        # Resolução menor e FPS baixo para Raspberry Pi
         config.enable_stream(rs.stream.color, 424, 240, rs.format.bgr8, 15)
         config.enable_stream(rs.stream.depth, 424, 240, rs.format.z16, 15)
 
-        self.pipeline.start(config)
+        profile = self.pipeline.start(config)
 
-        # Bridge ROS <-> OpenCV
+        # Intrinsics
+        color_stream = profile.get_stream(rs.stream.color)
+        depth_stream = profile.get_stream(rs.stream.depth)
+
+        self.color_intrinsics = color_stream.as_video_stream_profile().get_intrinsics()
+        self.depth_intrinsics = depth_stream.as_video_stream_profile().get_intrinsics()
+
+        # Bridge
         self.bridge = CvBridge()
 
-        # Publishers usando CompressedImage
-        self.color_pub = self.create_publisher(Image, '/camera/color/image_raw', qos)
-        self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', qos)
+        # Publishers
+        self.color_pub = self.create_publisher(
+            CompressedImage,
+            '/camera/color/compressed',
+            qos
+        )
 
-        # Timer ~30Hz
-        timer_period = 1.0 / 30.0
+        self.depth_pub = self.create_publisher(
+            Image,
+            '/camera/depth/image_raw',
+            qos
+        )
+
+        self.color_info_pub = self.create_publisher(
+            CameraInfo,
+            '/camera/color/camera_info',
+            qos
+        )
+
+        self.depth_info_pub = self.create_publisher(
+            CameraInfo,
+            '/camera/depth/camera_info',
+            qos
+        )
+
+        timer_period = 1.0 / 15.0
         self.timer = self.create_timer(timer_period, self.capture_callback)
 
-        self.get_logger().info("RealSense node iniciado (CompressedImage)")
+        self.get_logger().info("RealSense node iniciado")
+
+    def create_camera_info(self, intrinsics, frame_id):
+
+        msg = CameraInfo()
+
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = frame_id
+
+        msg.width = intrinsics.width
+        msg.height = intrinsics.height
+
+        msg.k = [
+            intrinsics.fx, 0.0, intrinsics.ppx,
+            0.0, intrinsics.fy, intrinsics.ppy,
+            0.0, 0.0, 1.0
+        ]
+
+        msg.p = [
+            intrinsics.fx, 0.0, intrinsics.ppx, 0.0,
+            0.0, intrinsics.fy, intrinsics.ppy, 0.0,
+            0.0, 0.0, 1.0, 0.0
+        ]
+
+        msg.r = [
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        ]
+
+        msg.d = list(intrinsics.coeffs)
+
+        msg.distortion_model = "plumb_bob"
+
+        return msg
 
     def capture_callback(self):
+
         try:
             frames = self.pipeline.wait_for_frames(timeout_ms=1000)
         except RuntimeError:
-            self.get_logger().warn("Nenhum frame recebido no tempo limite")
             return
 
         color_frame = frames.get_color_frame()
@@ -58,40 +117,73 @@ class CameraNode(Node):
         if not color_frame or not depth_frame:
             return
 
-        # Converte para numpy
         color_image = np.asanyarray(color_frame.get_data())
         depth_image = np.asanyarray(depth_frame.get_data())
 
-        # Normaliza depth para visualização
-        depth_colormap = cv.applyColorMap(
-            cv.convertScaleAbs(depth_image, alpha=0.03),
-            cv.COLORMAP_JET
+        timestamp = self.get_clock().now().to_msg()
+
+        # ---------- RGB JPEG ----------
+        success, buffer = cv.imencode(
+            ".jpg",
+            color_image,
+            [int(cv.IMWRITE_JPEG_QUALITY), 80]
         )
 
-        # Converte para ROS CompressedImage
-        color_msg = self.bridge.cv2_to_imgmsg(color_image, encoding='bgr8')
-        color_msg.header.frame_id = "camera_color"
-        color_msg.header.stamp = self.get_clock().now().to_msg()  # timestamp real
+        if success:
 
-        depth_msg = self.bridge.cv2_to_imgmsg(depth_colormap, encoding='bgr8')
+            color_msg = CompressedImage()
+
+            color_msg.header.stamp = timestamp
+            color_msg.header.frame_id = "camera_color"
+
+            color_msg.format = "jpeg"
+            color_msg.data = buffer.tobytes()
+
+            self.color_pub.publish(color_msg)
+
+        # ---------- DEPTH REAL ----------
+        depth_msg = self.bridge.cv2_to_imgmsg(
+            depth_image,
+            encoding="16UC1"
+        )
+
+        depth_msg.header.stamp = timestamp
         depth_msg.header.frame_id = "camera_depth"
-        depth_msg.header.stamp = self.get_clock().now().to_msg()  # timestamp real
 
-        # Publica
-        self.color_pub.publish(color_msg)
         self.depth_pub.publish(depth_msg)
 
+        # ---------- CAMERA INFO ----------
+        color_info = self.create_camera_info(
+            self.color_intrinsics,
+            "camera_color"
+        )
+
+        depth_info = self.create_camera_info(
+            self.depth_intrinsics,
+            "camera_depth"
+        )
+
+        color_info.header.stamp = timestamp
+        depth_info.header.stamp = timestamp
+
+        self.color_info_pub.publish(color_info)
+        self.depth_info_pub.publish(depth_info)
+
     def destroy_node(self):
+
         self.pipeline.stop()
         super().destroy_node()
 
 
 def main(args=None):
+
     rclpy.init(args=args)
+
     node = CameraNode()
 
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
 

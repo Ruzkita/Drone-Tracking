@@ -24,7 +24,8 @@ setup(
     entry_points={
         'console_scripts': [
             'tracking = drone_tracking_py.tracking:main',
-            'tracking_subscriber = drone_tracking_py.tracking_subscriber:main'
+            'tracking_subscriber = drone_tracking_py.tracking_subscriber:main',
+            'compressed_image_decoder = drone_tracking_py.compressed_image_decoder:main'
         ],
     },
 )
