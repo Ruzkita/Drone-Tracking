@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import cv2 as cv
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 import numpy as np
 from ultralytics import YOLO
@@ -130,35 +130,61 @@ class LukasKanade():
 
 class FrameTransform():
     def __init__(self):
-        self.fx, self.fy = 382.00628662109375, 382.00628662109375      
-        self.cx, self.cy = 326.43426513671875, 239.53616333007812     
+        self.fx, self.fy = None, None     
+        self.cx, self.cy = None, None 
         
-        theta = np.deg2rad(45)
-        self.R = np.array([
+        # ================================
+        # 1. Transformação câmera -> body
+        # ================================
+        R_cb = np.array([
+            [0, 0, 1],   # X_body = Z_camera (frente)
+            [-1, 0, 0],  # Y_body = -X_camera (direita/esquerda)
+            [0, -1, 0]   # Z_body = -Y_camera (cima)
+        ])
+
+        # ================================
+        # 2. Inclinação da câmera (pitch)
+        # ================================
+        theta = np.deg2rad(-45)  # NEGATIVO = inclinada pra baixo
+
+        R_tilt = np.array([
             [np.cos(theta), 0, np.sin(theta)],
             [0, 1, 0],
             [-np.sin(theta), 0, np.cos(theta)]
         ])
-        self.t = [0, 0, 0]  #a definir
+
+        # ================================
+        # 3. Rotação final
+        # ================================
+        self.R = R_cb @ R_tilt
+
+        self.t = np.array([0.0, 0.0, 0.0])  # pode ajustar depois
     
+
     def pixel_to_body_position(self, px, py, depth):
-        if depth <= 0:
+        if depth is None or depth <= 0:
             return None
 
+        # ===== pixel -> câmera =====
         Xc = (px - self.cx) * depth / self.fx
         Yc = (py - self.cy) * depth / self.fy
         Zc = depth
 
         p_c = np.array([Xc, Yc, Zc])
+
+        # ===== câmera -> body =====
         p_b = self.R @ p_c + self.t
 
         return p_b
     
-    
+
     def body_to_pixel(self, p_b):
+        if p_b is None:
+            return None
+
         p_b = np.array(p_b).reshape(3)
 
-        # volta para frame da câmera
+        # ===== body -> câmera =====
         p_c = self.R.T @ (p_b - self.t)
 
         Xc, Yc, Zc = p_c
@@ -166,21 +192,25 @@ class FrameTransform():
         if Zc <= 0:
             return None
 
+        # ===== câmera -> pixel =====
         u = self.fx * Xc / Zc + self.cx
         v = self.fy * Yc / Zc + self.cy
 
         return int(u), int(v)
     
-    
+
     def pixel_to_body_velocity(self, vpx, vpy, depth):
-        if depth <= 0:
+        if depth is None or depth <= 0:
             return None
         
+        # ===== pixel velocity -> câmera =====
         Vxc = depth * vpx / self.fx
         Vyc = depth * vpy / self.fy
         Vzc = 0.0
 
         v_c = np.array([Vxc, Vyc, Vzc])
+
+        # ===== câmera -> body =====
         v_b = self.R @ v_c
 
         return v_b
@@ -190,7 +220,7 @@ class FrameTransform():
 class KalmanFilter:
     def __init__(self):
         self.x = np.zeros((6, 1))                                   #px, py, z, vx, vy, vz -> variaveis 
-        self.P = np.eye(6) * 1000                                   #matriz diagonal com valor 1000 -> incerteza
+        self.P = np.eye(6) * 500                                   #matriz diagonal com valor 1000 -> incerteza
         self.Q = np.eye(6) * 0.1                                    #matriz de covariancia do modelo -> representa a covariancia dos ruidos e perturbações do processo (modelo)
         #self.R = np.eye(3) * 5.0                                    #matriz de covariancia do sensor -> diz o quanto vc confia na medição do sensor
 
@@ -246,6 +276,7 @@ class TrackerNode(Node):
         self.i = 0
         self.depth_frame = None
         self.last_time = None
+        self.camera_info_received = False
 
         #VARIÁVEIS DE MONITORAMENTO DE DESEMPENHO
         self.metrics_buffer = []
@@ -310,14 +341,23 @@ class TrackerNode(Node):
         qos2 = QoSProfile(reliability = ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1)
 
         #SUBSCRIBERS
-        self.camera_subscription = self.create_subscription(Image, '/camera/camera/color/image_raw', self.image_callback, qos)
-        self.depth_subscription = self.create_subscription(Image, '/camera/camera/depth/image_rect_raw', self.depth_callback, qos)
+        self.camera_subscription = self.create_subscription(Image, '/camera/color/image_raw', self.image_callback, qos)
+        self.depth_subscription = self.create_subscription(Image, '/camera/depth/image_raw', self.depth_callback, qos)
+        self.camera_info_subscription = self.create_subscription(CameraInfo, 'camera/color/camera_info', self.camera_info_callback, qos)
 
         #PUBLISHERS
         self.annotated_frame_publisher = self.create_publisher(Image, '/image/annotated_frame', qos2)
 
         self.create_timer(0.1, self.update_system_metrics)
 
+    def camera_info_callback(self, msg):
+        if not self.camera_info_received:
+            self.frame_transform.fx = msg.k[0]
+            self.frame_transform.fy = msg.k[4]
+            self.frame_transform.cx = msg.k[2]
+            self.frame_transform.cy = msg.k[5]
+
+            self.camera_info_received = True
     
     def depth_callback(self, msg):
         self.depth_frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
@@ -357,6 +397,9 @@ class TrackerNode(Node):
         self.annotated_frame_publisher.publish(msg)
 
     def image_callback(self, msg):
+        if not self.camera_info_received:
+            return
+        
         now = time.time()
         pipeline_start = time.time()
 
@@ -438,7 +481,7 @@ class TrackerNode(Node):
                 [0, 0, 1, 0, 0, 0]
                 ])
 
-                R = np.eye(3) * 0.01
+                R = np.eye(3) * 5.0
 
                 x, y = centers[0]
                 d = distance(int(x), int(y))
@@ -475,7 +518,7 @@ class TrackerNode(Node):
                 [0, 0, 0, 1, 0, 0],
                 [0, 0, 0, 0, 1, 0]
             ])
-            R = np.eye(2) * 0.1
+            R = np.eye(2) * 5.0
 
             z = self.frame_transform.pixel_to_body_velocity(vx, vy, d)
             z = z[:2].reshape(2, 1)
