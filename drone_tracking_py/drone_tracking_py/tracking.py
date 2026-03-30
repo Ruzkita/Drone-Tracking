@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.executors import MultiThreadedExecutor
 
 import cv2 as cv
 import pyrealsense2 as rs
@@ -65,7 +66,7 @@ class CameraNode(Node):
             qos
         )
 
-        timer_period = 1.0 / 15.0
+        timer_period = 1.0 / 30.0
         self.timer = self.create_timer(timer_period, self.capture_callback)
 
         self.get_logger().info("RealSense node iniciado")
@@ -180,9 +181,11 @@ def main(args=None):
     rclpy.init(args=args)
 
     node = CameraNode()
-
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    
     try:
-        rclpy.spin(node)
+        executor.spin()
 
     except KeyboardInterrupt:
         pass

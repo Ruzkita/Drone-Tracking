@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.executors import MultiThreadedExecutor
 
 import numpy as np
 import cv2 as cv
@@ -64,9 +65,11 @@ def main(args=None):
     rclpy.init(args=args)
 
     node = CompressedImageDecoder()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
 
     try:
-        rclpy.spin(node)
+        executor.spin()
 
     except KeyboardInterrupt:
         pass
