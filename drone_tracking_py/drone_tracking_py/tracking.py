@@ -17,7 +17,7 @@ class CameraNode(Node):
         super().__init__('realsense_camera')
 
         qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
@@ -26,8 +26,8 @@ class CameraNode(Node):
         self.pipeline = rs.pipeline()
         config = rs.config()
 
-        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+        config.enable_stream(rs.stream.color, 424, 240, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.depth, 424, 240, rs.format.z16, 30)
 
         profile = self.pipeline.start(config)
 
