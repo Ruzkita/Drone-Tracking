@@ -66,14 +66,14 @@ class CompressedImageDecoder(Node):
 
         t4 = time.time()
 
-        print(f"""
-frombuffer: {t1-t0:.4f}
-decode:     {t2-t1:.4f}
-bridge:     {t3-t2:.4f}
-publish:    {t4-t3:.4f}
-total:      {t4-t0:.4f}
-------------------------
-""")
+        #print(f"""
+#frombuffer: {t1-t0:.4f}
+#decode:     {t2-t1:.4f}
+#bridge:     {t3-t2:.4f}
+#publish:    {t4-t3:.4f}
+#total:      {t4-t0:.4f}
+#------------------------
+#""")
 
 
 def main(args=None):

@@ -156,7 +156,7 @@ class FrameTransform():
         # ================================
         # 3. Rotação final
         # ================================
-        self.R = R_cb @ R_tilt
+        self.R = R_tilt @ R_cb 
 
         self.t = np.array([0.0, 0.0, 0.0])  # pode ajustar depois
     

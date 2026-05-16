@@ -1,86 +1,61 @@
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
+import rosbag2_py
 import cv2 as cv
+from cv_bridge import CvBridge
+from rclpy.serialization import deserialize_message
+from sensor_msgs.msg import Image
 import os
-import time
 
+def extract_video_from_bag(bag_path, target_topic, output_video):
+    # 1. Configuração do Reader
+    reader = rosbag2_py.SequentialReader()
+    
+    # Verifica se é pasta (db3) ou arquivo (mcap)
+    storage_id = 'mcap' if bag_path.endswith('.mcap') else 'sqlite3'
+    
+    storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id=storage_id)
+    converter_options = rosbag2_py.ConverterOptions('', '')
+    reader.open(storage_options, converter_options)
 
-class VideoRecorder(Node):
-    def __init__(self):
-        super().__init__('video_recorder')
+    bridge = CvBridge()
+    video_writer = None
+    count = 0
+    
+    print(f"🚀 Iniciando extração do tópico: {target_topic}")
 
-        self.bridge = CvBridge()
+    while reader.has_next():
+        (topic, data, t) = reader.read_next()
+        
+        # 🔥 Filtro de Tópico: Só processa se for o que você pediu
+        if topic == target_topic:
+            msg = deserialize_message(data, Image)
+            frame = bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-        # ===== parâmetros =====
-        self.topic_name = '/camera/color/image_raw'  
-        self.output_path = 'output.avi'
-        self.fps = 15.0
+            # Inicializa o arquivo de vídeo no primeiro frame recebido
+            if video_writer is None:
+                h, w, _ = frame.shape
+                # Salvando em .avi com codec XVID
+                fourcc = cv.VideoWriter_fourcc(*'XVID')
+                video_writer = cv.VideoWriter(output_video, fourcc, 30.0, (w, h))
+                print(f"🎬 Formato definido: {w}x{h} @ 30 FPS")
 
-        # ===== writer =====
-        self.video_writer = None
-        self.frame_size = None
+            video_writer.write(frame)
+            count += 1
+            if count % 100 == 0:
+                print(f"📦 {count} frames processados...")
 
-        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1)
+    if video_writer:
+        video_writer.release()
+        print(f"✅ Sucesso! Vídeo salvo em: {output_video}")
+    else:
+        print(f"❌ Erro: O tópico '{target_topic}' não foi encontrado no bag ou não contém imagens.")
 
-        # subscriber
-        self.subscription = self.create_subscription(
-            Image,
-            self.topic_name,
-            self.image_callback,
-            qos
-        )
+# ==========================================
+# EXECUTAR AQUI
+# ==========================================
+if __name__ == "__main__":
+    # COLOQUE OS SEUS NOMES AQUI:
+    MEU_BAG = 'rosbag.db3'
+    MEU_TOPICO = '/image/annotated_frame'
+    ARQUIVO_SAIDA = 'video_extraido.avi'
 
-        self.get_logger().info(f"Gravando vídeo de: {self.topic_name}")
-
-
-    def image_callback(self, msg):
-        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-
-        # inicializa writer na primeira imagem
-        if self.video_writer is None:
-            height, width, _ = frame.shape
-            self.frame_size = (width, height)
-
-            fourcc = cv.VideoWriter_fourcc(*'MJPG')  
-            self.video_writer = cv.VideoWriter(
-                self.output_path,
-                fourcc,
-                self.fps,
-                self.frame_size
-            )
-
-            self.get_logger().info(
-                f"Vídeo iniciado: {self.output_path} | {width}x{height} @ {self.fps} FPS"
-            )
-
-        # escreve frame
-        self.video_writer.write(frame)
-
-
-    def destroy_node(self):
-        # garante que salva corretamente
-        if self.video_writer is not None:
-            self.video_writer.release()
-            self.get_logger().info("Vídeo salvo com sucesso.")
-
-        super().destroy_node()
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = VideoRecorder()
-
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-
-    node.destroy_node()
-    rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
+    extract_video_from_bag(MEU_BAG, MEU_TOPICO, ARQUIVO_SAIDA)
