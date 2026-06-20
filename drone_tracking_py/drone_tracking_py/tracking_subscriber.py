@@ -2,7 +2,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import cv2 as cv
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CameraInfo, CompressedImage
+from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
 import numpy as np
 from ultralytics import YOLO
@@ -22,7 +23,7 @@ class YoloDetection:
         self.model = YOLO(model_path)
     
     def detection(self, img):
-        results = self.model(img, verbose=False, conf=0.5)
+        results = self.model(img, verbose=False, conf=0.6)
         #annoted_frame = np.array(results[0].plot())
         return results
     
@@ -145,7 +146,7 @@ class FrameTransform():
         # ================================
         # 2. Inclinação da câmera (pitch)
         # ================================
-        theta = np.deg2rad(-45)  # NEGATIVO = inclinada pra baixo
+        theta = np.deg2rad(0)  # NEGATIVO = inclinada pra baixo
 
         R_tilt = np.array([
             [np.cos(theta), 0, np.sin(theta)],
@@ -278,6 +279,10 @@ class TrackerNode(Node):
         self.last_time = None
         self.camera_info_received = False
 
+        self.xdrone = 0.0
+        self.ydrone = 0.0
+        self.zdrone = 0.0
+
         #VARIÁVEIS DE MONITORAMENTO DE DESEMPENHO
         self.metrics_buffer = []
         self.kalman_buffer = []
@@ -326,14 +331,13 @@ class TrackerNode(Node):
         self.kalman_writer = csv.writer(self.kalman_file)
 
         self.kalman_writer.writerow([
-            "frame",
             "time",
-            "x",
-            "y",
-            "z",
-            "vx",
-            "vy",
-            "vz"
+            "xcam",
+            "ycam",
+            "zcam",
+            "xdrone",
+            "ydrone",
+            "zdrone"
         ])
 
         #QOS
@@ -341,9 +345,12 @@ class TrackerNode(Node):
         qos2 = QoSProfile(reliability = ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1)
 
         #SUBSCRIBERS
-        self.camera_subscription = self.create_subscription(Image, '/camera/color/image_raw', self.image_callback, qos)
+        #self.camera_subscription = self.create_subscription(Image, '/camera/color/image_raw', self.image_callback, qos)
+        self.camera_subscription = self.create_subscription(CompressedImage, '/camera/color/compressed', self.image_callback, qos)
         self.depth_subscription = self.create_subscription(Image, '/camera/depth/image_raw', self.depth_callback, qos)
         self.camera_info_subscription = self.create_subscription(CameraInfo, 'camera/color/camera_info', self.camera_info_callback, qos)
+
+        self.drone_odom_subscription = self.create_subscription(Odometry, '/tello/odom', self.drone_odom_callback, qos2)
 
         #PUBLISHERS
         self.annotated_frame_publisher = self.create_publisher(Image, '/image/annotated_frame', qos2)
@@ -361,6 +368,12 @@ class TrackerNode(Node):
     
     def depth_callback(self, msg):
         self.depth_frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+    
+    def drone_odom_callback(self, msg):
+        self.xdrone = msg.pose.pose.position.x
+        self.ydrone = msg.pose.pose.position.y
+        self.zdrone = msg.pose.pose.position.z
+
     
     def frame_publish(self, frame, state):
         if frame is None:
@@ -400,6 +413,9 @@ class TrackerNode(Node):
         if not self.camera_info_received:
             return
         
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        frame = cv.imdecode(np_arr, cv.IMREAD_COLOR)
+        
         now = time.time()
         pipeline_start = time.time()
 
@@ -426,7 +442,7 @@ class TrackerNode(Node):
         self.kalman.predict(dt)
         self.state = self.kalman.x
 
-        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        #frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
         #LATENCIA
         ros_time = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -535,14 +551,13 @@ class TrackerNode(Node):
         self.t_total = (time.time() - pipeline_start) * 1000
 
         self.kalman_buffer.append([
-            self.i,
             time.time(),
             float(self.state[0,0]),
             float(self.state[1,0]),
             float(self.state[2,0]),
-            float(self.state[3,0]),
-            float(self.state[4,0]),
-            float(self.state[5,0])
+            self.xdrone,
+            self.ydrone,
+            self.zdrone
         ])
 
         self.metrics_buffer.append([
